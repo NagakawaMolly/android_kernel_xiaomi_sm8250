@@ -6,7 +6,7 @@ on:
       device:
         description: 'Target Device Code (设备代号)'
         required: true
-        default: 'lmi'
+        default: 'alioth'
         type: choice
         options:
           - alioth
@@ -26,7 +26,7 @@ on:
         description: 'Enable KernelSU (ReSukiSU)'
         required: true
         type: boolean
-        default: false
+        default: true
       target_os:
         description: 'Target OS (目标系统)'
         required: true
@@ -37,15 +37,23 @@ on:
           - miui
           - both
 
+  schedule:
+    - cron: '0 0 * * *'  
+    - cron: '0 12 * * *' 
+
 jobs:
   build-kernel:
-    name: Build ${{ github.event.inputs.device }} | KSU:${{ github.event.inputs.ksu }} | OS:${{ github.event.inputs.target_os }}
+    name: Build ${{ github.event.inputs.device || 'alioth' }} | KSU:true | OS:${{ github.event.inputs.target_os || 'both' }}
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: write  # Required to create releases and tags
+      
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
+        repository: ${{ github.repository }}
+        ref: 'android16-aptusitu' 
         fetch-depth: 1
 
     - name: Set up Environment
@@ -62,9 +70,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/ccache_mikernel
-        key: ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ github.run_id }}
+        key: ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device || 'alioth' }}-${{ github.run_id }}
         restore-keys: |
-          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-
+          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device || 'alioth' }}-
           ${{ runner.os }}-kernel-ccache-
 
     - name: Setup zyc-clang 16 Toolchain
@@ -94,22 +102,70 @@ jobs:
       run: |
         chmod +x build_kernel.sh
         export LOCALVERSION=""
-        ARGS="${{ github.event.inputs.device }}"
         
-        if [ "${{ github.event.inputs.ksu }}" == "true" ]; then
+        DEVICE="${{ github.event.inputs.device }}"
+        [ -z "$DEVICE" ] && DEVICE="alioth"
+        
+        KSU="${{ github.event.inputs.ksu }}"
+        [ -z "$KSU" ] && KSU="true"
+        
+        TARGET_OS="${{ github.event.inputs.target_os }}"
+        [ -z "$TARGET_OS" ] && TARGET_OS="both"
+        
+        ARGS="$DEVICE"
+        if [ "$KSU" == "true" ]; then
           ARGS="$ARGS ksu"
         fi
         
-        if [ "${{ github.event.inputs.target_os }}" != "both" ]; then
-          ARGS="$ARGS ${{ github.event.inputs.target_os }}"
+        if [ "$TARGET_OS" != "both" ]; then
+          ARGS="$ARGS $TARGET_OS"
         fi
         
         echo "Executing command: ./build_kernel.sh $ARGS"
         ./build_kernel.sh $ARGS
 
-    - name: Upload Flashable ZIP
+    - name: Upload Flashable ZIP (Artifacts)
       uses: actions/upload-artifact@v4
       with:
-        name: DEBUG_APTKernel-${{ github.event.inputs.device }}-${{ github.event.inputs.target_os }}-${{ github.run_id }}
+        name: DEBUG_APTKernel-${{ github.event.inputs.device || 'alioth' }}-${{ github.event.inputs.target_os || 'both' }}-${{ github.run_id }}
         path: "*APTKernel_*.zip"
         compression-level: 0
+
+    - name: Get Build Metadata
+      id: metadata
+      run: |
+        echo "DATE=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')" >> $github_output
+        TAG_NAME="v$(TZ='Asia/Shanghai' date '+%Y%m%d-%H%M')-${{ github.event.inputs.device || 'alioth' }}"
+        echo "TAG_NAME=$TAG_NAME" >> $github_output
+        
+        ZIP_FILE=$(ls *APTKernel_*.zip | head -n 1)
+        if [ -f "$ZIP_FILE" ]; then
+          FILE_SIZE=$(du -h "$ZIP_FILE" | awk '{print $1}')
+          echo "ZIP_NAME=$ZIP_FILE" >> $github_output
+          echo "ZIP_SIZE=$FILE_SIZE" >> $github_output
+        else
+          echo "ZIP_SIZE=Unknown" >> $github_output
+        fi
+
+    - name: Release and Publish to GitHub
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.metadata.outputs.TAG_NAME }}
+        name: "Kernel Build for ${{ github.event.inputs.device || 'alioth' }} (${{ steps.metadata.outputs.DATE }})"
+        files: "*APTKernel_*.zip"
+        body: |
+
+          * **Branch (构建分支):** `android16-aptusitu`
+          * **Trigger Type (触发方式):** `${{ github.event_name }}`
+          * **Target Device (设备代号):** `${{ github.event.inputs.device || 'alioth' }}`
+          * **KernelSU (KSU):** `true`
+          * **Target OS (目标系统):** `${{ github.event.inputs.target_os || 'both' }}`
+          * **Build Date (构建时间):** `${{ steps.metadata.outputs.DATE }} (CST)`
+          * **Package Name (文件名):** `${{ steps.metadata.outputs.ZIP_NAME }}`
+          * **Package Size (文件大小):** `${{ steps.metadata.outputs.ZIP_SIZE }}`
+          * **Compiler Toolchain:** ZyCromerZ Clang 16.0.6
+
+          * Built from branch: `android16-aptusitu`
+          * Includes KernelSU (ReSukiSU)
+          * Updated with custom suffix: `-ReSukiSU-Ikun-KirinNova`
+          * Cleaned extra localversion strings (`CIP`/`ST`)
