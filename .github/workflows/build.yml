@@ -36,6 +36,14 @@ on:
           - aosp
           - miui
           - both
+      publish_release:
+        description: 'Publish to GitHub Releases (是否发布到 GitHub Releases)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 jobs:
   build-kernel:
@@ -96,3 +104,49 @@ jobs:
         name: APTKernel-${{ github.event.inputs.device }}-${{ github.event.inputs.target_os }}-${{ github.run_id }}
         path: APTKernel_*.zip
         compression-level: 0 # 已经被 zip 压缩过，无需再二次压缩
+
+  release:
+    name: Publish GitHub Release
+    if: ${{ github.event.inputs.publish_release == 'true' || github.event.inputs.publish_release == true }}
+    needs: build-kernel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Generate Release Info
+        id: vars
+        run: |
+          echo "BUILD_DATE=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=v$(date +'%Y%m%d')-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+          echo "SHA_SHORT=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: APTKernel-${{ github.event.inputs.device }}-${{ github.event.inputs.target_os }}-${{ github.run_id }}
+          path: release_kernels
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.TAG_NAME }}
+          name: "APTKernel Build - ${{ steps.vars.outputs.BUILD_DATE }} (${{ steps.vars.outputs.SHA_SHORT }})"
+          body: |
+            ## 自动构建内核发布 / Automated Kernel Release
+            
+            - **构建日期 / Build Date:** ${{ steps.vars.outputs.BUILD_DATE }}
+            - **提交哈希 / Commit SHA:** `${{ steps.vars.outputs.SHA_SHORT }}`
+            - **目标设备 / Target Device:** `${{ github.event.inputs.device }}`
+            - **目标系统 / Target OS:** `${{ github.event.inputs.target_os }}`
+            - **KernelSU 启用 / KernelSU Enabled:** `${{ github.event.inputs.ksu }}`
+            
+            ---
+            ### 刷机包分类指南 / Flashable ZIP Instructions:
+            - **MIUI**: 适用于原厂 MIUI / HyperOS 或基于 MIUI 修改的第三方 ROM。
+            - **AOSP**: 适用于 LineageOS 等类原生 AOSP ROM。
+            - **ReSukiSU-SuSFS**: 集成 ReSukiSU 与 SuSFS。
+            - **NoKernelSU**: 原版纯净内核，支持自行使用 Magisk 或 APatch 刷入。
+          files: release_kernels/*.zip
