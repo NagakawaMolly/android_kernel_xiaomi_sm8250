@@ -162,6 +162,7 @@ configure_droidspaces_non_gki() {
         NETFILTER_XT_TARGET_TCPMSS NETFILTER_XT_MATCH_ADDRTYPE
         NF_CT_NETLINK NF_NAT_REDIRECT
         IP_ADVANCED_ROUTER IP_MULTIPLE_TABLES
+        MACVLAN IP6_NF_NAT IP6_NF_TARGET_MASQUERADE CFS_BANDWIDTH
     )
 
     echo "Enable official Droidspaces non-GKI kernel configuration..."
@@ -214,6 +215,10 @@ configure_droidspaces_non_gki() {
         -e NF_NAT_IPV4 \
         -e IP_NF_NAT \
         -e USER_NS \
+        -e MACVLAN \
+        -e IP6_NF_NAT \
+        -e IP6_NF_TARGET_MASQUERADE \
+        -e CFS_BANDWIDTH \
         -d ANDROID_PARANOID_NETWORK
 
     # Resolve dependencies now
